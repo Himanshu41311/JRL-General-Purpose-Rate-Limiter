@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JRL — General Rate Limiter</title>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/landing.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html">
+      <span class="brand-mark">JR</span>
+      <span class="brand-name">JRL <span class="brand-sub">/ rate limiter</span></span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#algorithms">Algorithms</a></li>
+      <li><a href="#how-it-works">How it works</a></li>
+      <li><a href="#api">API</a></li>
+    </ul>
+    <div class="nav-actions">
+      <a class="btn btn-ghost btn-sm" href="pages/signin.html">Sign in</a>
+      <a class="btn btn-primary btn-sm" href="pages/signup.html">Sign up</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container hero-grid">
+    <div>
+      <div class="eyebrow hero-eyebrow">Redis-backed · atomic · academic project</div>
+      <h1>One gate,<br><em>shared</em> by every route you register.</h1>
+      <p class="lede">
+        JRL sits in front of your APIs and decides, per request, whether it gets
+        through — using four interchangeable algorithms, evaluated atomically
+        in Redis, with no coordination needed between instances.
+      </p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="pages/signup.html">Create an account</a>
+        <a class="btn btn-ghost" href="#how-it-works">See how it works</a>
+      </div>
+      <div class="hero-meta">
+        <span><strong>4</strong> algorithms</span>
+        <span><strong>1</strong> shared gate</span>
+        <span><strong>0ms</strong> Postgres on the request path</span>
+      </div>
+    </div>
+
+    <div class="flow-card">
+      <div class="flow-card-head">
+        <span class="flow-card-title">LIVE — TOKEN BUCKET, CAPACITY 5</span>
+        <div class="flow-stats">
+          <span class="flow-stat-allow">allowed <span id="flowAllowed">0</span></span>
+          <span class="flow-stat-deny">denied <span id="flowDenied">0</span></span>
+        </div>
+      </div>
+      <div class="flow-stage" id="flowStage">
+        <span class="flow-lane-label pass">PASS</span>
+        <span class="flow-lane-label block">DENIED · 429</span>
+        <div class="flow-gate"></div>
+      </div>
+      <p class="flow-caption">
+        Every dot is a simulated request. The bucket refills one token roughly
+        every 900ms — this is the same decision <code>TokenBucketAlgorithm</code>
+        makes against Redis, just visualized client-side.
+      </p>
+    </div>
+  </div>
+</header>
+
+<section class="section" id="algorithms">
+  <div class="container">
+    <div class="section-head">
+      <h2>Four algorithms. One interface.</h2>
+      <p>Every policy picks one — the proxy dispatches to the matching Lua script atomically, so two requests arriving in the same instant can never both slip through a race condition.</p>
+    </div>
+    <div class="algo-grid">
+      <div class="algo-card">
+        <div class="algo-num">01</div>
+        <div class="algo-visual">
+          <span style="height:30%"></span><span style="height:30%"></span><span style="height:30%"></span>
+          <span style="height:85%; background:var(--deny)"></span><span style="height:15%"></span><span style="height:15%"></span>
+        </div>
+        <h3>Fixed window</h3>
+        <p>A counter resets every N seconds. Cheapest option — can allow up to 2× the limit right at a window boundary.</p>
+      </div>
+      <div class="algo-card">
+        <div class="algo-num">02</div>
+        <div class="algo-visual">
+          <span style="height:35%"></span><span style="height:45%"></span><span style="height:50%"></span>
+          <span style="height:48%"></span><span style="height:46%"></span><span style="height:44%"></span>
+        </div>
+        <h3>Sliding window</h3>
+        <p>A Redis sorted set tracks exact request timestamps. No boundary burst — the limit is always measured over the last N seconds, precisely.</p>
+      </div>
+      <div class="algo-card">
+        <div class="algo-num">03</div>
+        <div class="algo-visual">
+          <span style="height:20%"></span><span style="height:90%; background:var(--allow)"></span><span style="height:70%; background:var(--allow)"></span>
+          <span style="height:20%"></span><span style="height:20%"></span><span style="height:55%; background:var(--allow)"></span>
+        </div>
+        <h3>Token bucket</h3>
+        <p>Tokens refill continuously up to a capacity. Lets short bursts through immediately, then throttles to the steady refill rate.</p>
+      </div>
+      <div class="algo-card">
+        <div class="algo-num">04</div>
+        <div class="algo-visual">
+          <span style="height:80%"></span><span style="height:65%"></span><span style="height:52%"></span>
+          <span style="height:40%"></span><span style="height:28%"></span><span style="height:18%"></span>
+        </div>
+        <h3>Leaky bucket</h3>
+        <p>A level fills per request and drains at a constant rate. Smooths bursts into a steady outflow instead of letting them through at once.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="how-it-works" style="border-top:1px solid var(--line-soft)">
+  <div class="container">
+    <div class="section-head">
+      <h2>How a request actually gets decided</h2>
+      <p>Three steps, all inside the request's own round trip — nothing here waits on Postgres.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Route + policy come from Redis</h3>
+        <p>Every proxy instance reads the same <code>route:{id}</code> and <code>route-policies:{id}</code> keys — no per-instance staleness, no database round trip.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>Policies evaluate in parallel</h3>
+        <p>Each active policy runs its algorithm's Lua script against Redis concurrently. If any policy denies, the request is denied — most restrictive wins.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Allow and proxy, or deny with headers</h3>
+        <p>Allowed requests stream straight through to your backend. Denied ones get <code>429</code> with <code>Retry-After</code> and <code>X-RateLimit-*</code> headers.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="api" style="border-top:1px solid var(--line-soft)">
+  <div class="container">
+    <div class="section-head">
+      <h2>What a policy looks like</h2>
+      <p>This is the exact shape the proxy reads — scope, where to look for an identity, which algorithm, and its config.</p>
+    </div>
+    <div class="code-panel">
+      <div class="code-panel-head">
+        <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+        <span>route-policies:8a21f0e2-...</span>
+      </div>
+      <pre><span class="tok-punc">[{</span>
+  <span class="tok-key">"scope"</span><span class="tok-punc">:</span> <span class="tok-str">"API_KEY"</span><span class="tok-punc">,</span>
+  <span class="tok-key">"identifierSource"</span><span class="tok-punc">:</span> <span class="tok-str">"HEADER"</span><span class="tok-punc">,</span>
+  <span class="tok-key">"identifierValue"</span><span class="tok-punc">:</span> <span class="tok-str">"X-Api-Key"</span><span class="tok-punc">,</span>
+  <span class="tok-key">"algorithm"</span><span class="tok-punc">:</span> <span class="tok-str">"TOKEN_BUCKET"</span><span class="tok-punc">,</span>
+  <span class="tok-key">"algorithmConfig"</span><span class="tok-punc">:</span> <span class="tok-str">"{\"capacity\":50,\"ratePerSecond\":5}"</span>
+<span class="tok-punc">}]</span></pre>
+    </div>
+    <div class="response-strip">
+      <div class="response-chip allow">
+        <div class="code">200 · X-RateLimit-Remaining: 42</div>
+        <p>Request proxied through to your backend, untouched.</p>
+      </div>
+      <div class="response-chip deny">
+        <div class="code">429 · Retry-After: 3</div>
+        <p>Request denied before it ever reaches your backend.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta-band">
+  <div class="container">
+    <h2>Register a route in under a minute.</h2>
+    <p>Sign up, add your backend URL, attach a policy — that's the whole setup.</p>
+    <div class="cta-band-actions">
+      <a class="btn btn-primary" href="pages/signup.html">Create an account</a>
+      <a class="btn btn-ghost" href="pages/signin.html">Sign in</a>
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer">
+  JRL — General Rate Limiter. An academic project. Not affiliated with Redis.
+</footer>
+
+<script src="js/flow-demo.js"></script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+/* Landing-page-only styles, layered on top of styles.css */
+
+.hero {
+  padding: 88px 0 60px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 56px;
+  align-items: center;
+}
+.hero-eyebrow { margin-bottom: 20px; }
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: 52px;
+  line-height: 1.08;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 20px;
+}
+.hero h1 em {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--signal);
+}
+.hero p.lede {
+  font-size: 17px;
+  color: var(--text-muted);
+  max-width: 480px;
+  margin-bottom: 30px;
+}
+.hero-ctas { display: flex; gap: 12px; margin-bottom: 34px; }
+.hero-meta {
+  display: flex;
+  gap: 26px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+.hero-meta strong { color: var(--text-primary); font-weight: 600; }
+
+/* ---------- Flow demo (signature element) ---------- */
+.flow-card {
+  background: var(--ink-900);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.flow-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.flow-card-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
+.flow-stats {
+  display: flex;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.flow-stat-allow { color: var(--allow); }
+.flow-stat-deny { color: var(--deny); }
+
+.flow-stage {
+  position: relative;
+  height: 220px;
+  background: var(--ink-950);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.flow-gate {
+  position: absolute;
+  left: 62%;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(to bottom, transparent, var(--signal-dim), transparent);
+}
+.flow-gate::before {
+  content: 'GATE';
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--signal);
+  white-space: nowrap;
+}
+.flow-lane-label {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+.flow-lane-label.pass { top: 8px; right: 10px; color: var(--allow); }
+.flow-lane-label.block { bottom: 8px; right: 10px; color: var(--deny); }
+
+.flow-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  top: 50%;
+  left: -14px;
+}
+
+.flow-caption {
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+/* ---------- Section scaffolding ---------- */
+.section { padding: 72px 0; }
+.section-head { max-width: 620px; margin-bottom: 44px; }
+.section-head h2 {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+.section-head p { color: var(--text-muted); font-size: 15px; }
+
+/* ---------- Algorithm showcase ---------- */
+.algo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.algo-card {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  padding: 22px 20px;
+  background: var(--ink-900);
+}
+.algo-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--signal);
+  margin-bottom: 16px;
+}
+.algo-card h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.algo-card p { font-size: 13.5px; color: var(--text-muted); margin: 0; }
+.algo-visual {
+  height: 44px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+}
+.algo-visual span {
+  flex: 1;
+  background: var(--line);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ---------- How it works ---------- */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.step { border-left: 2px solid var(--line); padding-left: 18px; }
+.step-num { font-family: var(--font-mono); font-size: 12px; color: var(--signal); margin-bottom: 10px; }
+.step h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.step p { font-size: 13.5px; color: var(--text-muted); margin: 0; }
+
+/* ---------- Code sample ---------- */
+.code-panel {
+  background: var(--ink-900);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.code-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.code-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.code-panel pre {
+  margin: 0;
+  padding: 20px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+.code-panel .tok-key { color: var(--signal); }
+.code-panel .tok-str { color: var(--allow); }
+.code-panel .tok-punc { color: var(--text-faint); }
+
+/* ---------- Response strip ---------- */
+.response-strip {
+  display: flex;
+  gap: 14px;
+  margin-top: 18px;
+}
+.response-chip {
+  flex: 1;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  background: var(--ink-900);
+}
+.response-chip .code { font-family: var(--font-mono); font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.response-chip.allow .code { color: var(--allow); }
+.response-chip.deny .code { color: var(--deny); }
+.response-chip p { margin: 0; font-size: 12.5px; color: var(--text-muted); }
+
+/* ---------- Final CTA ---------- */
+.cta-band {
+  border-top: 1px solid var(--line-soft);
+  padding: 64px 0;
+  text-align: center;
+}
+.cta-band h2 {
+  font-family: var(--font-display);
+  font-size: 30px;
+  margin-bottom: 14px;
+}
+.cta-band p { color: var(--text-muted); margin-bottom: 26px; }
+.cta-band-actions { display: flex; gap: 12px; justify-content: center; }
+
+@media (max-width: 900px) {
+  .hero-grid { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 38px; }
+  .algo-grid { grid-template-columns: 1fr 1fr; }
+  .steps { grid-template-columns: 1fr; }
+  .response-strip { flex-direction: column; }
+}

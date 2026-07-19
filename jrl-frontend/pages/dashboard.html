@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Routes — JRL</title>
+<link rel="stylesheet" href="../css/styles.css">
+<style>
+  .coming-soon-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--signal-wash);
+    color: var(--signal);
+    border: 1px solid rgba(245,166,35,0.35);
+    border-radius: 100px;
+    padding: 2px 8px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="app-sidebar">
+    <a class="brand" href="../index.html">
+      <span class="brand-mark">JR</span>
+      <span class="brand-name">JRL</span>
+    </a>
+    <nav class="app-sidebar-nav">
+      <a href="dashboard.html" class="active">Routes</a>
+      <a href="profile.html">Profile</a>
+    </nav>
+  </aside>
+
+  <main class="app-main">
+    <div class="app-header">
+      <div>
+        <h1 class="app-title">Routes</h1>
+        <p class="app-subtitle">Each route will proxy to one backend URL and carry its own rate-limit policies.</p>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <a class="user-chip" href="profile.html" id="userChip">Loading…</a>
+        <button class="btn btn-primary btn-sm" id="newRouteBtn">
+          New route <span class="coming-soon-badge">Coming soon</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="empty-state">
+      <h3>Route management isn't wired up yet</h3>
+      <p>
+        Sign-up and sign-in are real now — <code>jrl-auth-service</code> issues
+        an actual JWT and this page just verified it against the server.
+        Creating routes and policies needs a separate admin API (talking to
+        Redis) that hasn't been built yet. This screen is here so the shape
+        of the product is visible; the button does nothing but say so.
+      </p>
+    </div>
+  </main>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth-guard.js"></script>
+<script src="../js/toast.js"></script>
+<script>
+  (async function init() {
+    const user = await requireAuth();
+    if (!user) return; // requireAuth already redirected
+
+    document.getElementById('userChip').innerHTML =
+      `<span class="avatar-dot">${user.name.charAt(0).toUpperCase()}</span> ${user.name}`;
+  })();
+
+  document.getElementById('newRouteBtn').addEventListener('click', () => {
+    showToast('Route creation is coming soon — this will call the admin service once it exists.');
+  });
+</script>
+</body>
+</html>
