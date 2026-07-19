@@ -6,19 +6,20 @@
 <title>Routes — JRL</title>
 <link rel="stylesheet" href="../css/styles.css">
 <style>
-  .coming-soon-badge {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    background: var(--signal-wash);
-    color: var(--signal);
-    border: 1px solid rgba(245,166,35,0.35);
-    border-radius: 100px;
-    padding: 2px 8px;
-    margin-left: 8px;
-    vertical-align: middle;
+  .status-dot {
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    margin-right: 8px;
+    flex-shrink: 0;
   }
+  .status-dot.live { background: var(--allow); box-shadow: 0 0 0 3px var(--allow-wash); }
+  .status-dot.down { background: var(--deny); box-shadow: 0 0 0 3px var(--deny-wash); }
+  .status-dot.checking { background: var(--text-faint); }
+  .route-row-status { display: flex; align-items: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  .route-row-actions { display: flex; gap: 6px; }
+  .icon-btn { background: none; border: 1px solid var(--line); color: var(--text-muted); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
+  .icon-btn:hover { color: var(--text-primary); border-color: var(--text-faint); }
 </style>
 </head>
 <body>
@@ -39,27 +40,44 @@
     <div class="app-header">
       <div>
         <h1 class="app-title">Routes</h1>
-        <p class="app-subtitle">Each route will proxy to one backend URL and carry its own rate-limit policies.</p>
+        <p class="app-subtitle">Each route proxies to one backend URL and carries its own rate-limit policies.</p>
       </div>
       <div style="display:flex; align-items:center; gap:12px;">
         <a class="user-chip" href="profile.html" id="userChip">Loading…</a>
-        <button class="btn btn-primary btn-sm" id="newRouteBtn">
-          New route <span class="coming-soon-badge">Coming soon</span>
-        </button>
+        <button class="btn btn-primary btn-sm" id="newRouteBtn">New route</button>
       </div>
     </div>
 
-    <div class="empty-state">
-      <h3>Route management isn't wired up yet</h3>
-      <p>
-        Sign-up and sign-in are real now — <code>jrl-auth-service</code> issues
-        an actual JWT and this page just verified it against the server.
-        Creating routes and policies needs a separate admin API (talking to
-        Redis) that hasn't been built yet. This screen is here so the shape
-        of the product is visible; the button does nothing but say so.
-      </p>
+    <div id="routeListWrap">
+      <div class="empty-state"><p>Loading routes…</p></div>
     </div>
   </main>
+</div>
+
+<!-- Create route modal -->
+<div class="modal-overlay" id="routeModalOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>New route</h3>
+      <button class="modal-close" id="closeRouteModal">&times;</button>
+    </div>
+    <div class="form-error" id="routeFormError"></div>
+    <form id="routeForm">
+      <div class="field">
+        <label for="routeName">Name</label>
+        <input type="text" id="routeName" required placeholder="Payments API">
+      </div>
+      <div class="field">
+        <label for="targetUrl">Backend URL</label>
+        <input type="url" id="targetUrl" required placeholder="https://api.yourcompany.com/v1">
+        <p class="hint">Traffic that passes the rate limit is forwarded here, unmodified.</p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="cancelRouteBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="routeSubmitBtn">Create route</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <script src="../js/config.js"></script>
@@ -67,16 +85,134 @@
 <script src="../js/auth-guard.js"></script>
 <script src="../js/toast.js"></script>
 <script>
+  let statusPollTimer = null;
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  async function renderRoutes() {
+    const wrap = document.getElementById('routeListWrap');
+    let routes;
+    try {
+      routes = await JRL.listRoutes();
+    } catch (err) {
+      wrap.innerHTML = `<div class="empty-state"><h3>Couldn't load routes</h3><p>${escapeHtml(err.message)}</p></div>`;
+      return;
+    }
+
+    if (routes.length === 0) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <h3>No routes yet</h3>
+          <p>Create a route, point it at your backend, then attach a policy to start limiting traffic.</p>
+          <button class="btn btn-primary btn-sm" onclick="document.getElementById('newRouteBtn').click()">Create your first route</button>
+        </div>`;
+      return;
+    }
+
+    wrap.innerHTML = `<div class="row-list">` + routes.map(r => `
+      <div class="route-row" data-route-id="${r.routeId}">
+        <a class="route-row-main" href="route.html?id=${encodeURIComponent(r.routeId)}" style="text-decoration:none; color:inherit;">
+          <div class="route-row-name">${escapeHtml(r.name)}</div>
+          <div class="route-row-url">${escapeHtml(r.targetUrl)}</div>
+        </a>
+        <div class="route-row-meta">
+          <span class="route-row-status">
+            <span class="status-dot ${r.live ? 'live' : 'down'}" data-dot="${r.routeId}"></span>
+            ${r.live ? 'live' : 'not live'}
+          </span>
+          <span class="pill ${r.active ? 'pill-active' : ''}">${r.active ? 'active' : 'paused'}</span>
+          <div class="route-row-actions">
+            <a class="icon-btn" href="route.html?id=${encodeURIComponent(r.routeId)}">Manage</a>
+            <button class="icon-btn" data-delete-route="${r.routeId}">Delete</button>
+          </div>
+        </div>
+      </div>
+    `).join('') + `</div>`;
+
+    wrap.querySelectorAll('[data-delete-route]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const routeId = btn.dataset.deleteRoute;
+        if (!confirm('Delete this route and all of its policies? This cannot be undone.')) return;
+        try {
+          await JRL.deleteRoute(routeId);
+          showToast('Route deleted');
+          renderRoutes();
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
+    });
+
+    schedulePoll(routes.map(r => r.routeId));
+  }
+
+  // Periodically re-checks the live status dot without re-rendering the whole
+  // list — mirrors what a real dashboard would do to keep the dot honest.
+  function schedulePoll(routeIds) {
+    clearInterval(statusPollTimer);
+    statusPollTimer = setInterval(async () => {
+      for (const routeId of routeIds) {
+        const dot = document.querySelector(`[data-dot="${routeId}"]`);
+        if (!dot) continue;
+        try {
+          const status = await JRL.getRouteStatus(routeId);
+          dot.className = `status-dot ${status.live ? 'live' : 'down'}`;
+        } catch {
+          dot.className = 'status-dot down';
+        }
+      }
+    }, 8000);
+  }
+
   (async function init() {
     const user = await requireAuth();
-    if (!user) return; // requireAuth already redirected
+    if (!user) return;
 
     document.getElementById('userChip').innerHTML =
       `<span class="avatar-dot">${user.name.charAt(0).toUpperCase()}</span> ${user.name}`;
+
+    renderRoutes();
   })();
 
+  const overlay = document.getElementById('routeModalOverlay');
+  const form = document.getElementById('routeForm');
+  const errorEl = document.getElementById('routeFormError');
+  const submitBtn = document.getElementById('routeSubmitBtn');
+
   document.getElementById('newRouteBtn').addEventListener('click', () => {
-    showToast('Route creation is coming soon — this will call the admin service once it exists.');
+    form.reset();
+    errorEl.classList.remove('visible');
+    overlay.classList.add('open');
+  });
+  document.getElementById('closeRouteModal').addEventListener('click', () => overlay.classList.remove('open'));
+  document.getElementById('cancelRouteBtn').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.classList.remove('visible');
+    const name = document.getElementById('routeName').value.trim();
+    const targetUrl = document.getElementById('targetUrl').value.trim();
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating…';
+    try {
+      await JRL.createRoute({ name, targetUrl });
+      overlay.classList.remove('open');
+      showToast('Route created');
+      renderRoutes();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.classList.add('visible');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Create route';
+    }
   });
 </script>
 </body>

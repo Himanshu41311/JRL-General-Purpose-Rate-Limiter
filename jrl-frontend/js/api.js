@@ -1,10 +1,7 @@
 /**
- * Talks to jrl-auth-service (see js/config.js for the URL). This replaces
- * the old localStorage mock entirely for auth — sign-up/sign-in/profile
- * are now real HTTP calls, real BCrypt hashing, real JWTs.
- *
- * Route/policy management is NOT here. There's no admin API yet — see
- * "coming soon" on the dashboard — so this file only covers identity.
+ * Talks to jrl-auth-service (see js/config.js for the URL). Covers auth
+ * (sign-up/sign-in/profile) and the route/policy admin API — everything
+ * this frontend needs is a real HTTP call now, nothing here is mocked.
  */
 const JRL = (() => {
   const API_BASE = (window.JRL_CONFIG && window.JRL_CONFIG.apiBaseUrl) || 'http://localhost:8081';
@@ -102,5 +99,59 @@ const JRL = (() => {
     return user;
   }
 
-  return { signUp, signIn, signOut, cachedUser, me, updateProfile };
+  // ---------- routes ----------
+  // Every RouteResponse includes `active` (Postgres's setting) and `live`
+  // (a fresh Redis read, done server-side on every call) — `live` is what
+  // the dashboard's green/red dot reflects.
+  function listRoutes() {
+    return request('/api/routes', { method: 'GET' });
+  }
+
+  function getRoute(routeId) {
+    return request(`/api/routes/${routeId}`, { method: 'GET' });
+  }
+
+  // Lightweight poll for just the dot, without re-fetching the whole route.
+  function getRouteStatus(routeId) {
+    return request(`/api/routes/${routeId}/status`, { method: 'GET' });
+  }
+
+  function createRoute({ name, targetUrl }) {
+    return request('/api/routes', { method: 'POST', body: JSON.stringify({ name, targetUrl }) });
+  }
+
+  function updateRoute(routeId, { name, targetUrl, active }) {
+    return request(`/api/routes/${routeId}`, { method: 'PUT', body: JSON.stringify({ name, targetUrl, active }) });
+  }
+
+  function deleteRoute(routeId) {
+    return request(`/api/routes/${routeId}`, { method: 'DELETE' });
+  }
+
+  // ---------- policies ----------
+  function listPolicies(routeId) {
+    return request(`/api/routes/${routeId}/policies`, { method: 'GET' });
+  }
+
+  // data: { scope, identifierSource, identifierValue, algorithm, algorithmConfig }
+  function createPolicy(routeId, data) {
+    return request(`/api/routes/${routeId}/policies`, { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  // data: { algorithm, algorithmConfig, active } ONLY — the backend rejects
+  // scope/identifierSource/identifierValue on update by design (those are
+  // baked into the Redis counter key; changing them means delete + recreate).
+  function updatePolicy(routeId, policyId, data) {
+    return request(`/api/routes/${routeId}/policies/${policyId}`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  function deletePolicy(routeId, policyId) {
+    return request(`/api/routes/${routeId}/policies/${policyId}`, { method: 'DELETE' });
+  }
+
+  return {
+    signUp, signIn, signOut, cachedUser, me, updateProfile,
+    listRoutes, getRoute, getRouteStatus, createRoute, updateRoute, deleteRoute,
+    listPolicies, createPolicy, updatePolicy, deletePolicy,
+  };
 })();

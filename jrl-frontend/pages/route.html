@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Route — JRL</title>
+<link rel="stylesheet" href="../css/styles.css">
+<style>
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+  .toggle-row .toggle-label { font-size: 14px; }
+  .toggle-row .toggle-label .sub { display: block; font-size: 12.5px; color: var(--text-faint); margin-top: 2px; }
+  .switch { position: relative; width: 40px; height: 22px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track { position: absolute; inset: 0; background: var(--line); border-radius: 100px; cursor: pointer; transition: background 0.15s ease; }
+  .switch .track::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--text-primary); border-radius: 50%; transition: transform 0.15s ease; }
+  .switch input:checked + .track { background: var(--allow-wash); border: 1px solid rgba(62,214,181,0.4); }
+  .switch input:checked + .track::before { transform: translateX(18px); background: var(--allow); }
+
+  .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
+  .status-dot.live { background: var(--allow); box-shadow: 0 0 0 3px var(--allow-wash); }
+  .status-dot.down { background: var(--deny); box-shadow: 0 0 0 3px var(--deny-wash); }
+  .status-line { display: flex; align-items: center; font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted); margin-bottom: 18px; }
+
+  .policy-row { padding: 16px 18px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--ink-900); }
+  .policy-row + .policy-row { margin-top: 10px; }
+  .policy-row-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .policy-row-title { font-weight: 600; font-size: 14.5px; display:flex; align-items:center; gap:8px; }
+  .policy-row-detail { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted); }
+  .policy-row-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .icon-btn { background: none; border: 1px solid var(--line); color: var(--text-muted); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .icon-btn:hover { color: var(--text-primary); border-color: var(--text-faint); }
+  .locked-field { opacity: 0.55; }
+  .locked-note { font-size: 12px; color: var(--text-faint); margin: -8px 0 18px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="app-sidebar">
+    <a class="brand" href="../index.html">
+      <span class="brand-mark">JR</span>
+      <span class="brand-name">JRL</span>
+    </a>
+    <nav class="app-sidebar-nav">
+      <a href="dashboard.html" class="active">Routes</a>
+      <a href="profile.html">Profile</a>
+    </nav>
+  </aside>
+
+  <main class="app-main">
+    <div class="app-header">
+      <div>
+        <p class="app-subtitle" style="margin-bottom:4px;"><a href="dashboard.html" style="color:var(--text-muted); text-decoration:none;">&larr; Routes</a></p>
+        <h1 class="app-title" id="routeTitle">Route</h1>
+      </div>
+      <a class="user-chip" href="profile.html" id="userChip"></a>
+    </div>
+
+    <div id="routeNotFound" style="display:none;" class="empty-state">
+      <h3>Route not found</h3>
+      <p>It may have been deleted, or the link is wrong.</p>
+      <a class="btn btn-primary btn-sm" href="dashboard.html">Back to routes</a>
+    </div>
+
+    <div id="routeContent" style="display:none;">
+      <div class="status-line">
+        <span class="status-dot" id="liveDot"></span>
+        <span id="liveText">Checking…</span>
+        <button class="btn btn-ghost btn-sm" id="recheckBtn" style="margin-left:12px; padding:4px 10px;">Check now</button>
+      </div>
+
+      <div class="form-error" id="routeFormError"></div>
+      <div class="card">
+        <div class="field">
+          <label for="routeNameInput">Name</label>
+          <input type="text" id="routeNameInput" style="font-family: var(--font-body);">
+        </div>
+        <div class="field">
+          <label for="targetUrlInput">Backend URL</label>
+          <input type="url" id="targetUrlInput">
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">
+            Active
+            <span class="sub">Paused routes return 404 — nothing gets proxied or limited.</span>
+          </span>
+          <label class="switch">
+            <input type="checkbox" id="activeToggle">
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="modal-actions" style="margin-top:20px;">
+          <button class="btn btn-primary btn-sm" id="saveRouteBtn">Save changes</button>
+          <button class="btn btn-danger btn-sm" id="deleteRouteBtn">Delete route</button>
+        </div>
+      </div>
+
+      <div class="app-header" style="margin-top:34px; margin-bottom:14px;">
+        <div>
+          <h2 style="font-family:var(--font-display); font-size:20px; font-weight:500;">Policies</h2>
+          <p class="app-subtitle">A request is denied if any active policy denies it — most restrictive wins.</p>
+        </div>
+        <button class="btn btn-primary btn-sm" id="newPolicyBtn">Add policy</button>
+      </div>
+      <div id="policyListWrap"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Policy modal -->
+<div class="modal-overlay" id="policyModalOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="policyModalTitle">Add policy</h3>
+      <button class="modal-close" id="closePolicyModal">&times;</button>
+    </div>
+    <div class="form-error" id="policyFormError"></div>
+    <form id="policyForm">
+      <input type="hidden" id="policyId">
+
+      <div id="scopeSection">
+        <div class="field">
+          <label for="scope">Scope — who shares one counter</label>
+          <select id="scope">
+            <option value="GLOBAL">Global — one counter for the whole route</option>
+            <option value="IP">Per IP address</option>
+            <option value="API_KEY">Per API key</option>
+            <option value="USER">Per user identifier</option>
+          </select>
+        </div>
+
+        <div id="identifierFields">
+          <div class="field-row">
+            <div class="field">
+              <label for="identifierSource">Read identity from</label>
+              <select id="identifierSource">
+                <option value="HEADER">Header</option>
+                <option value="QUERY_PARAM">Query parameter</option>
+                <option value="COOKIE">Cookie</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="identifierValue">Name</label>
+              <input type="text" id="identifierValue" placeholder="X-Api-Key">
+            </div>
+          </div>
+        </div>
+        <p class="locked-note" id="lockedNote" style="display:none;">
+          Scope and identity source can't be changed after creation — delete this policy and add a new one if who it applies to needs to change.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="algorithm">Algorithm</label>
+        <select id="algorithm">
+          <option value="FIXED_WINDOW">Fixed window</option>
+          <option value="SLIDING_WINDOW">Sliding window</option>
+          <option value="TOKEN_BUCKET">Token bucket</option>
+          <option value="LEAKY_BUCKET">Leaky bucket</option>
+        </select>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="limit">Limit</label>
+          <input type="number" id="limit" min="1" required placeholder="100">
+        </div>
+        <div class="field">
+          <label for="windowSize">Per</label>
+          <input type="number" id="windowSize" min="1" required placeholder="1">
+        </div>
+      </div>
+      <div class="field">
+        <label for="windowUnit">Window unit</label>
+        <select id="windowUnit">
+          <option value="SECOND">Second(s)</option>
+          <option value="MINUTE" selected>Minute(s)</option>
+          <option value="HOUR">Hour(s)</option>
+          <option value="DAY">Day(s)</option>
+        </select>
+        <p class="hint">For token/leaky bucket, this limit is converted into a steady rate — e.g. 100 per minute becomes roughly 1.67 tokens/sec.</p>
+      </div>
+
+      <div class="field" id="activeFieldWrap" style="display:none;">
+        <div class="toggle-row">
+          <span class="toggle-label">Active</span>
+          <label class="switch">
+            <input type="checkbox" id="policyActiveToggle">
+            <span class="track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="cancelPolicyBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="policySubmitBtn">Save policy</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth-guard.js"></script>
+<script src="../js/toast.js"></script>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const routeId = params.get('id');
+  let route = null;
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  (async function init() {
+    const user = await requireAuth();
+    if (!user) return;
+    document.getElementById('userChip').innerHTML =
+      `<span class="avatar-dot">${user.name.charAt(0).toUpperCase()}</span> ${user.name}`;
+
+    if (!routeId) {
+      document.getElementById('routeNotFound').style.display = 'block';
+      return;
+    }
+
+    try {
+      route = await JRL.getRoute(routeId);
+    } catch (err) {
+      document.getElementById('routeNotFound').style.display = 'block';
+      return;
+    }
+
+    document.getElementById('routeContent').style.display = 'block';
+    initRoutePage();
+  })();
+
+  function renderLiveStatus(status) {
+    const dot = document.getElementById('liveDot');
+    const text = document.getElementById('liveText');
+    dot.className = `status-dot ${status.live ? 'live' : 'down'}`;
+    text.textContent = status.live
+      ? '/r/' + routeId + ' is live in Redis — the proxy will serve it'
+      : 'Not live in Redis right now — the proxy would 404 this route';
+  }
+
+  async function checkLiveStatus() {
+    try {
+      const status = await JRL.getRouteStatus(routeId);
+      renderLiveStatus(status);
+    } catch (err) {
+      document.getElementById('liveDot').className = 'status-dot down';
+      document.getElementById('liveText').textContent = 'Could not check status';
+    }
+  }
+
+  function initRoutePage() {
+    document.getElementById('routeTitle').textContent = route.name;
+    document.getElementById('routeNameInput').value = route.name;
+    document.getElementById('targetUrlInput').value = route.targetUrl;
+    document.getElementById('activeToggle').checked = route.active;
+    renderLiveStatus({ live: route.live });
+
+    document.getElementById('recheckBtn').addEventListener('click', checkLiveStatus);
+
+    const routeErrorEl = document.getElementById('routeFormError');
+
+    document.getElementById('saveRouteBtn').addEventListener('click', async () => {
+      routeErrorEl.classList.remove('visible');
+      const name = document.getElementById('routeNameInput').value.trim();
+      const targetUrl = document.getElementById('targetUrlInput').value.trim();
+      const active = document.getElementById('activeToggle').checked;
+      try {
+        route = await JRL.updateRoute(route.routeId, { name, targetUrl, active });
+        document.getElementById('routeTitle').textContent = route.name;
+        renderLiveStatus({ live: route.live });
+        showToast('Route saved');
+      } catch (err) {
+        routeErrorEl.textContent = err.message;
+        routeErrorEl.classList.add('visible');
+      }
+    });
+
+    document.getElementById('deleteRouteBtn').addEventListener('click', async () => {
+      if (!confirm(`Delete "${route.name}" and all of its policies? This can't be undone.`)) return;
+      try {
+        await JRL.deleteRoute(route.routeId);
+        window.location.href = 'dashboard.html';
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+
+    renderPolicies();
+    setupPolicyModal();
+  }
+
+  function algorithmLabel(a) {
+    return { FIXED_WINDOW: 'Fixed window', SLIDING_WINDOW: 'Sliding window', TOKEN_BUCKET: 'Token bucket', LEAKY_BUCKET: 'Leaky bucket' }[a] || a;
+  }
+  function scopeLabel(s) {
+    return { GLOBAL: 'Global', IP: 'Per IP', API_KEY: 'Per API key', USER: 'Per user' }[s] || s;
+  }
+
+  async function renderPolicies() {
+    const wrap = document.getElementById('policyListWrap');
+    let policies;
+    try {
+      policies = await JRL.listPolicies(route.routeId);
+    } catch (err) {
+      wrap.innerHTML = `<div class="empty-state"><h3>Couldn't load policies</h3><p>${escapeHtml(err.message)}</p></div>`;
+      return;
+    }
+
+    if (policies.length === 0) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <h3>No policies yet</h3>
+          <p>Without a policy, requests to this route are refused with 403 — add one to start allowing (and limiting) traffic.</p>
+          <button class="btn btn-primary btn-sm" onclick="document.getElementById('newPolicyBtn').click()">Add your first policy</button>
+        </div>`;
+      return;
+    }
+
+    wrap.innerHTML = policies.map(p => {
+      let config = {};
+      try { config = JSON.parse(p.algorithmConfig); } catch {}
+      const summary = `${config.limit ?? '?'} / ${config.windowSize ?? '?'} ${(config.windowUnit || '').toLowerCase()}`;
+      const idLine = p.identifierSource ? ` via ${p.identifierSource.toLowerCase()} "${escapeHtml(p.identifierValue || '')}"` : '';
+      return `
+        <div class="policy-row">
+          <div class="policy-row-top">
+            <div class="policy-row-title">
+              ${algorithmLabel(p.algorithm)}
+              <span class="pill ${p.active ? 'pill-active' : ''}">${scopeLabel(p.scope)}</span>
+            </div>
+            <div class="policy-row-actions">
+              <button class="icon-btn" data-edit="${p.policyId}">Edit</button>
+              <button class="icon-btn" data-delete="${p.policyId}">Delete</button>
+            </div>
+          </div>
+          <div class="policy-row-detail">${summary}${idLine}</div>
+        </div>`;
+    }).join('');
+
+    wrap.querySelectorAll('[data-edit]').forEach(btn =>
+      btn.addEventListener('click', () => openPolicyModal(btn.dataset.edit, policies)));
+    wrap.querySelectorAll('[data-delete]').forEach(btn =>
+      btn.addEventListener('click', async () => {
+        if (!confirm('Delete this policy?')) return;
+        try {
+          await JRL.deletePolicy(route.routeId, btn.dataset.delete);
+          renderPolicies();
+          showToast('Policy deleted');
+        } catch (err) {
+          showToast(err.message);
+        }
+      }));
+  }
+
+  function setupPolicyModal() {
+    const overlay = document.getElementById('policyModalOverlay');
+    const form = document.getElementById('policyForm');
+    const errorEl = document.getElementById('policyFormError');
+    const scopeSelect = document.getElementById('scope');
+    const identifierFields = document.getElementById('identifierFields');
+    const scopeSection = document.getElementById('scopeSection');
+    const lockedNote = document.getElementById('lockedNote');
+    const activeFieldWrap = document.getElementById('activeFieldWrap');
+    const submitBtn = document.getElementById('policySubmitBtn');
+
+    function syncIdentifierVisibility() {
+      const needsIdentifier = scopeSelect.value === 'USER' || scopeSelect.value === 'API_KEY';
+      identifierFields.style.display = needsIdentifier ? 'block' : 'none';
+    }
+    scopeSelect.addEventListener('change', syncIdentifierVisibility);
+
+    document.getElementById('newPolicyBtn').addEventListener('click', () => openPolicyModal(null, []));
+    document.getElementById('closePolicyModal').addEventListener('click', () => overlay.classList.remove('open'));
+    document.getElementById('cancelPolicyBtn').addEventListener('click', () => overlay.classList.remove('open'));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+
+    window.openPolicyModal = function (policyId, cachedPolicies) {
+      form.reset();
+      errorEl.classList.remove('visible');
+      document.getElementById('policyId').value = policyId || '';
+      document.getElementById('policyModalTitle').textContent = policyId ? 'Edit policy' : 'Add policy';
+
+      const isEdit = Boolean(policyId);
+      // Editing only ever changes algorithm/config/active — scope and identity
+      // are locked in from creation (see the backend's PolicyUpdateRequest).
+      scopeSection.classList.toggle('locked-field', isEdit);
+      scopeSelect.disabled = isEdit;
+      document.getElementById('identifierSource').disabled = isEdit;
+      document.getElementById('identifierValue').disabled = isEdit;
+      lockedNote.style.display = isEdit ? 'block' : 'none';
+      activeFieldWrap.style.display = isEdit ? 'block' : 'none';
+
+      if (isEdit) {
+        const p = cachedPolicies.find(x => x.policyId === policyId);
+        if (p) {
+          scopeSelect.value = p.scope;
+          document.getElementById('identifierSource').value = p.identifierSource || 'HEADER';
+          document.getElementById('identifierValue').value = p.identifierValue || '';
+          document.getElementById('algorithm').value = p.algorithm;
+          document.getElementById('policyActiveToggle').checked = p.active;
+          try {
+            const cfg = JSON.parse(p.algorithmConfig);
+            document.getElementById('limit').value = cfg.limit || '';
+            document.getElementById('windowSize').value = cfg.windowSize || '';
+            document.getElementById('windowUnit').value = cfg.windowUnit || 'MINUTE';
+          } catch {}
+        }
+      }
+      syncIdentifierVisibility();
+      overlay.classList.add('open');
+    };
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.classList.remove('visible');
+
+      const existingId = document.getElementById('policyId').value;
+      const isEdit = Boolean(existingId);
+
+      const limit = Number(document.getElementById('limit').value);
+      const windowSize = Number(document.getElementById('windowSize').value);
+      const windowUnit = document.getElementById('windowUnit').value;
+      if (!limit || !windowSize) {
+        errorEl.textContent = 'Limit and window must be positive numbers.';
+        errorEl.classList.add('visible');
+        return;
+      }
+      const algorithmConfig = JSON.stringify({ limit, windowSize, windowUnit });
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving…';
+
+      try {
+        if (isEdit) {
+          await JRL.updatePolicy(route.routeId, existingId, {
+            algorithm: document.getElementById('algorithm').value,
+            algorithmConfig,
+            active: document.getElementById('policyActiveToggle').checked,
+          });
+          showToast('Policy updated');
+        } else {
+          const scope = scopeSelect.value;
+          const needsIdentifier = scope === 'USER' || scope === 'API_KEY';
+          const identifierValue = document.getElementById('identifierValue').value.trim();
+          if (needsIdentifier && !identifierValue) {
+            errorEl.textContent = 'Enter a header/param/cookie name to read the identity from.';
+            errorEl.classList.add('visible');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Save policy';
+            return;
+          }
+          await JRL.createPolicy(route.routeId, {
+            scope,
+            identifierSource: needsIdentifier ? document.getElementById('identifierSource').value : null,
+            identifierValue: needsIdentifier ? identifierValue : null,
+            algorithm: document.getElementById('algorithm').value,
+            algorithmConfig,
+          });
+          showToast('Policy added');
+        }
+        overlay.classList.remove('open');
+        renderPolicies();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.add('visible');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save policy';
+      }
+    });
+  }
+</script>
+</body>
+</html>

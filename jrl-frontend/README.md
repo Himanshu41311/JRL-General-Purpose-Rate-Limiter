@@ -1,53 +1,56 @@
 # JRL — General Rate Limiter (frontend)
 
-Landing page plus sign-up/sign-in/profile for JRL, the Redis-backed rate
-limiter proxy. No build step — open `index.html`, or serve the folder with
-any static file server (e.g. `npx serve .`).
+Landing page plus sign-up/sign-in/profile/route/policy management for JRL,
+the Redis-backed rate limiter proxy. No build step — open `index.html`, or
+serve the folder with any static file server (e.g. `npx serve .`).
 
-## This now needs a real backend running
+## Backend
 
-Sign-up, sign-in, and profile are wired to **jrl-auth-service** — a real
-Spring Boot service issuing real JWTs, not the old localStorage mock.
+`js/config.js` points at the deployed backend:
 
-1. Start `jrl-auth-service` (see its own README) — it runs on
-   `http://localhost:8081` by default.
-2. Open this frontend. `js/config.js` points at that URL — change it there
-   if you run the backend somewhere else.
-3. Sign up. You'll get a real JWT back, stored in `localStorage`, sent as
-   `Authorization: Bearer ...` on every subsequent request.
+```
+https://jrl-general-purpose-rate-limiter-production.up.railway.app
+```
 
-If the backend isn't running, sign-up/sign-in will show an error saying so
-(`js/api.js`'s `request()` catches the fetch failure and surfaces it) rather
-than failing silently.
+Everything — sign-up, sign-in, profile, routes, policies — is a real HTTP
+call to that URL. Change `apiBaseUrl` there if you're running the backend
+somewhere else (e.g. locally on `http://localhost:8081`).
 
 ## Pages
 
 - `index.html` — landing page, live token-bucket animation as the hero.
-- `pages/signup.html`, `pages/signin.html` — real auth against
-  jrl-auth-service.
-- `pages/dashboard.html` — verifies your session against the server
-  (`requireAuth()` calls `GET /api/auth/me`), then shows a **"Routes" page
-  that's honestly a coming-soon placeholder** — see below.
-- `pages/profile.html` — real name/email/customerId from the server, name
-  is editable via `PUT /api/auth/me`.
+- `pages/signup.html`, `pages/signin.html` — real auth.
+- `pages/dashboard.html` — lists your routes, each with:
+  - a **green/red dot** — a live Redis check (`GET /api/routes/{id}/status`),
+    polled every 8s. This can legitimately disagree with the "active" pill
+    next to it: `active` is what Postgres has stored, the dot is whether the
+    proxy would actually find the route in Redis *right now*. If they
+    disagree, the dual-write from the backend silently failed — see that
+    project's README.
+  - create / delete actions.
+- `pages/route.html?id=...` — edit a route's name/URL/active state, force a
+  fresh live-status check, and manage its policies (add/edit/delete).
+- `pages/profile.html` — name/email/customerId from the server.
 
-## Why routes/policies are "coming soon"
+## Editing a policy is deliberately restricted
 
-There's still no admin API that writes `route:*` / `route-policies:*` into
-Redis — that's a separate service, not built yet. Rather than fake route
-creation against localStorage (which would now be inconsistent with real
-server-issued accounts/customerIds), the dashboard shows the "New route"
-button with a visible "Coming soon" badge; clicking it just says so. The old
-mock CRUD (`route.html`, and the old `js/api.js`'s route/policy functions)
-has been removed rather than left half-working.
+Creating a policy lets you set scope, identity source, algorithm, and
+limits. **Editing one only lets you change the algorithm, its limit/window,
+and whether it's active** — the scope and identity-source fields are shown
+disabled with a note explaining why (they're baked into the Redis counter
+key the rate limiter proxy uses; changing them in place would orphan an
+existing counter). This mirrors the backend's `PolicyUpdateRequest` exactly
+— the UI isn't just hiding fields cosmetically, the API itself rejects them
+on update.
 
-## What's real now vs. still mock/missing
+## What's real vs. still missing
 
-**Real:** password hashing (BCrypt), JWT issuance/validation, CORS, a proper
-401 if your token is missing/expired/invalid, server-side email uniqueness.
+**Real:** every button on every page above calls the actual backend. No
+localStorage mock remains anywhere in this project.
 
-**Still missing:** the admin API for routes/policies (hence "coming soon"),
-token revocation (signing out only forgets the token client-side — see
-jrl-auth-service's README), refresh tokens, password reset, and any actual
-usage/metrics dashboard reading the Prometheus data the rate limiter proxy
-emits.
+**Still missing:** any usage/metrics dashboard reading the Prometheus data
+the rate limiter proxy itself emits (separate from this admin API entirely),
+and this frontend doesn't handle a 401 mid-session on the routes/policies
+pages by redirecting to sign-in — only the initial page load is guarded via
+`requireAuth()`. If your token expires while you're sitting on a page, the
+next action will show an error message rather than bouncing you to sign-in.
