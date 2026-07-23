@@ -34,13 +34,30 @@ import java.util.Objects;
  * predictably instead of hanging every request or throwing raw
  * connection errors.
  *
+ * IMPORTANT — the refund step below: because policies are evaluated in
+ * parallel, a policy that WOULD allow a request still consumes one unit of
+ * its quota the instant its own Lua script runs — before this class has any
+ * idea whether a sibling policy is about to deny the same request. Left
+ * alone, that's a real leak: every denied request silently drains quota
+ * from whichever policies would have allowed it. So once the final decision
+ * is known, if it's a denial, every policy that was individually allowed
+ * gets a compensating refund() call to undo its consumption. This is a
+ * best-effort correction, not a second atomic transaction spanning all
+ * policies — there's a brief window where a counter reflects "consumed"
+ * before the refund lands, and a refund itself can fail (logged, not
+ * retried). The alternative (peek-then-commit across two Redis round trips
+ * per policy, even when everything would've been allowed) was rejected as
+ * not worth doubling latency on the common path for this.
+ *
  * Redis failure behavior (fail-open vs fail-closed) is configurable via
  * `rlaas.redis.failure-mode` (see RateLimiterProperties) rather than
  * hardcoded — default is CLOSED (deny traffic) since silently letting
  * every customer's requests through unlimited is the riskier default to
  * ship with. Flip to OPEN once you've decided that's the right tradeoff
  * for your traffic. Either way, the result is tagged redisUnavailable=true so
- * ProxyService can log/count it distinctly from a normal decision.
+ * ProxyService can log/count it distinctly from a normal decision — and so
+ * the refund step below knows never to refund it (nothing real was
+ * consumed in the first place).
  */
 @Slf4j
 @Service
@@ -82,10 +99,19 @@ public class RateLimitService {
         return Flux.fromIterable(activePolicies)
                 .flatMap(policy -> evaluateSinglePolicy(route, policy, request))
                 .collectList()
-                .map(results -> reduce(results));
+                .flatMap(evaluations -> finalizeDecision(route, evaluations));
     }
 
-    private Mono<RateLimitResult> evaluateSinglePolicy(CachedRoute route, CachedPolicy policy, ServerHttpRequest request) {
+    /**
+     * Carries everything needed to issue a refund later (executor, key,
+     * config) alongside the result itself — evaluate() doesn't know yet
+     * whether this policy's "allowed" will end up mattering.
+     */
+    private record PolicyEvaluation(RateLimitAlgorithmExecutor executor, String key,
+                                     AlgorithmConfig config, RateLimitResult result) {
+    }
+
+    private Mono<PolicyEvaluation> evaluateSinglePolicy(CachedRoute route, CachedPolicy policy, ServerHttpRequest request) {
 
         AlgorithmConfig config;
         RateLimitAlgorithmExecutor executor;
@@ -101,9 +127,14 @@ public class RateLimitService {
             return Mono.empty();
         }
 
+        RateLimitAlgorithmExecutor finalExecutor = executor;
+        String finalKey = key;
+        AlgorithmConfig finalConfig = config;
+
         return executor.evaluate(key, config)
                 .map(result -> result.toBuilder().policyId(policy.getPolicyId()).build())
                 .transformDeferred(CircuitBreakerOperator.of(circuitBreaker))
+                .map(result -> new PolicyEvaluation(finalExecutor, finalKey, finalConfig, result))
                 .onErrorResume(ex -> {
                     meterRegistry.counter("rate_limiter_redis_failures_total",
                                     "customerId", nullToUnknown(route.getCustomerId()),
@@ -115,8 +146,47 @@ public class RateLimitService {
                             policy.getPolicyId(), route.getRouteId(),
                             allowOnFailure ? "open" : "closed", ex.toString());
 
-                    return Mono.just(allowOnFailure ? failOpenResult(policy) : failClosedResult(policy));
+                    RateLimitResult fallback = allowOnFailure ? failOpenResult(policy) : failClosedResult(policy);
+                    // executor/key/config are still carried here even though nothing was
+                    // actually consumed — harmless, because redisUnavailable=true on this
+                    // result makes finalizeDecision() skip it during the refund pass.
+                    return Mono.just(new PolicyEvaluation(finalExecutor, finalKey, finalConfig, fallback));
                 });
+    }
+
+    private Mono<RateLimitResult> finalizeDecision(CachedRoute route, List<PolicyEvaluation> evaluations) {
+
+        if (evaluations.isEmpty()) {
+            return Mono.just(allowDefault());
+        }
+
+        RateLimitResult decision = reduce(evaluations.stream().map(PolicyEvaluation::result).toList());
+
+        if (decision.isAllowed()) {
+            return Mono.just(decision);
+        }
+
+        // Denied overall — every policy that individually said "allowed" and actually
+        // consumed something real (not a redisUnavailable fallback) needs that
+        // consumption undone, or it's permanently lost for a request that never
+        // actually got through. See this class's javadoc for why this can't simply
+        // be avoided by checking before consuming.
+        List<PolicyEvaluation> toRefund = evaluations.stream()
+                .filter(e -> e.result().isAllowed() && !e.result().isRedisUnavailable())
+                .toList();
+
+        if (toRefund.isEmpty()) {
+            return Mono.just(decision);
+        }
+
+        return Flux.fromIterable(toRefund)
+                .flatMap(e -> e.executor().refund(e.key(), e.config(), e.result().getRefundToken())
+                        .onErrorResume(ex -> {
+                            log.error("Failed to refund policy {} on route {} after a sibling policy denied the request: {}",
+                                    e.result().getPolicyId(), route.getRouteId(), ex.toString());
+                            return Mono.empty();
+                        }))
+                .then(Mono.just(decision));
     }
 
     private RateLimitResult reduce(List<RateLimitResult> results) {
