@@ -49,23 +49,6 @@ public class FixedWindowAlgorithm extends AbstractRateLimitAlgorithm implements 
         SCRIPT.setResultType(List.class);
     }
 
-    // DECR (and INCRBY) never touch a key's TTL — only EXPIRE/SET do — so this
-    // is safe to run without worrying about resetting the window's expiry.
-    // Floors at 0 rather than going negative if, e.g., the key already expired
-    // between evaluate() and this refund landing.
-    private static final DefaultRedisScript<Long> REFUND_SCRIPT = new DefaultRedisScript<>();
-    static {
-        REFUND_SCRIPT.setScriptText(
-                "local key = KEYS[1]\n" +
-                "local current = redis.call('DECR', key)\n" +
-                "if current < 0 then\n" +
-                "    redis.call('SET', key, 0, 'KEEPTTL')\n" +
-                "end\n" +
-                "return 1"
-        );
-        REFUND_SCRIPT.setResultType(Long.class);
-    }
-
     public FixedWindowAlgorithm(ReactiveStringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
     }
@@ -102,12 +85,5 @@ public class FixedWindowAlgorithm extends AbstractRateLimitAlgorithm implements 
                             .algorithm(getType().name())
                             .build();
                 });
-    }
-
-    @Override
-    public Mono<Void> refund(String key, AlgorithmConfig config, String refundToken) {
-        return redisTemplate.execute(REFUND_SCRIPT, Collections.singletonList(key), List.of())
-                .next()
-                .then();
     }
 }
