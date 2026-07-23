@@ -67,6 +67,26 @@ public class LeakyBucketAlgorithm extends AbstractRateLimitAlgorithm implements 
         SCRIPT.setResultType(List.class);
     }
 
+    // Undoes the +1 evaluate() added to 'level'. Deliberately does NOT touch
+    // 'ts' — that's the drain clock, and nudging it would let a refund also
+    // grant extra un-earned drain time.
+    private static final DefaultRedisScript<Long> REFUND_SCRIPT = new DefaultRedisScript<>();
+    static {
+        REFUND_SCRIPT.setScriptText(
+                "local key = KEYS[1]\n" +
+                "local data = redis.call('HMGET', key, 'level')\n" +
+                "local level = tonumber(data[1])\n" +
+                "if level == nil then\n" +
+                "    return 0\n" +
+                "end\n" +
+                "\n" +
+                "level = math.max(0, level - 1)\n" +
+                "redis.call('HSET', key, 'level', level)\n" +
+                "return 1"
+        );
+        REFUND_SCRIPT.setResultType(Long.class);
+    }
+
     public LeakyBucketAlgorithm(ReactiveStringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
     }
@@ -103,5 +123,12 @@ public class LeakyBucketAlgorithm extends AbstractRateLimitAlgorithm implements 
                             .algorithm(getType().name())
                             .build();
                 });
+    }
+
+    @Override
+    public Mono<Void> refund(String key, AlgorithmConfig config, String refundToken) {
+        return redisTemplate.execute(REFUND_SCRIPT, Collections.singletonList(key), List.of())
+                .next()
+                .then();
     }
 }

@@ -65,6 +65,29 @@ public class TokenBucketAlgorithm extends AbstractRateLimitAlgorithm implements 
         SCRIPT.setResultType(List.class);
     }
 
+    // Hands back 1 token, capped at capacity (in case a real refill already
+    // pushed tokens close to full between evaluate() and this landing).
+    // Deliberately does NOT touch 'ts' — that's the refill clock, and nudging
+    // it would let a refund also grant extra un-earned refill time.
+    private static final DefaultRedisScript<Long> REFUND_SCRIPT = new DefaultRedisScript<>();
+    static {
+        REFUND_SCRIPT.setScriptText(
+                "local key = KEYS[1]\n" +
+                "local capacity = tonumber(ARGV[1])\n" +
+                "\n" +
+                "local data = redis.call('HMGET', key, 'tokens')\n" +
+                "local tokens = tonumber(data[1])\n" +
+                "if tokens == nil then\n" +
+                "    return 0\n" +
+                "end\n" +
+                "\n" +
+                "tokens = math.min(capacity, tokens + 1)\n" +
+                "redis.call('HSET', key, 'tokens', tokens)\n" +
+                "return 1"
+        );
+        REFUND_SCRIPT.setResultType(Long.class);
+    }
+
     public TokenBucketAlgorithm(ReactiveStringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
     }
@@ -101,5 +124,13 @@ public class TokenBucketAlgorithm extends AbstractRateLimitAlgorithm implements 
                             .algorithm(getType().name())
                             .build();
                 });
+    }
+
+    @Override
+    public Mono<Void> refund(String key, AlgorithmConfig config, String refundToken) {
+        long capacity = config.effectiveCapacity();
+        return redisTemplate.execute(REFUND_SCRIPT, Collections.singletonList(key), List.of(String.valueOf(capacity)))
+                .next()
+                .then();
     }
 }

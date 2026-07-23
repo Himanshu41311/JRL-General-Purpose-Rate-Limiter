@@ -51,6 +51,20 @@ public class SlidingWindowAlgorithm extends AbstractRateLimitAlgorithm implement
         SCRIPT.setResultType(List.class);
     }
 
+    // Removes exactly the one sorted-set entry evaluate() added — not a blind
+    // "remove one member", the precise member string it generated, so a refund
+    // can never accidentally remove a different, legitimate request's entry.
+    private static final DefaultRedisScript<Long> REFUND_SCRIPT = new DefaultRedisScript<>();
+    static {
+        REFUND_SCRIPT.setScriptText(
+                "local key = KEYS[1]\n" +
+                "local member = ARGV[1]\n" +
+                "redis.call('ZREM', key, member)\n" +
+                "return 1"
+        );
+        REFUND_SCRIPT.setResultType(Long.class);
+    }
+
     public SlidingWindowAlgorithm(ReactiveStringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
     }
@@ -86,7 +100,20 @@ public class SlidingWindowAlgorithm extends AbstractRateLimitAlgorithm implement
                             .resetAfterSeconds(resetAfter)
                             .retryAfterSeconds(allowed ? 0 : resetAfter)
                             .algorithm(getType().name())
+                            // Only set when actually allowed — a denied result never
+                            // added an entry, so there'd be nothing to refund anyway.
+                            .refundToken(allowed ? member : null)
                             .build();
                 });
+    }
+
+    @Override
+    public Mono<Void> refund(String key, AlgorithmConfig config, String refundToken) {
+        if (refundToken == null) {
+            return Mono.empty();
+        }
+        return redisTemplate.execute(REFUND_SCRIPT, Collections.singletonList(key), List.of(refundToken))
+                .next()
+                .then();
     }
 }
