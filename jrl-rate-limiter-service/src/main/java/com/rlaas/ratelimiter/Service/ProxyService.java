@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -140,11 +141,23 @@ public class ProxyService {
                     HttpHeaders responseHeaders = new HttpHeaders();
                     copyForwardableHeaders(clientResponse.headers().asHttpHeaders(), responseHeaders);
 
-                    return Mono.just(
-                            ResponseEntity.status(clientResponse.statusCode())
+                    // IMPORTANT: exchangeToMono's contract requires the response body to be
+                    // fully consumed (or explicitly released) INSIDE this function — otherwise
+                    // WebClient can consider the exchange "done" and return the underlying
+                    // Reactor Netty connection to the pool before whatever consumes the body
+                    // downstream (Spring's own web server, writing to our caller's response)
+                    // ever subscribes to it. That race is exactly what was producing a 200
+                    // with correct headers but a silently empty body. DataBufferUtils.join
+                    // fully drains and copies the backend's response into one independent
+                    // buffer, decoupled from the connection, before this function's Mono
+                    // resolves — trading pure streaming on this leg for correctness.
+                    // defaultIfEmpty covers genuinely empty bodies (e.g. 204, HEAD responses).
+                    return DataBufferUtils.join(clientResponse.bodyToFlux(DataBuffer.class))
+                            .map(Flux::just)
+                            .defaultIfEmpty(Flux.<DataBuffer>empty())
+                            .map(joinedBody -> ResponseEntity.status(clientResponse.statusCode())
                                     .headers(responseHeaders)
-                                    .body(clientResponse.bodyToFlux(DataBuffer.class))
-                    );
+                                    .body(joinedBody));
                 })
                 .onErrorResume(ex -> {
                     log.error("Error forwarding request to {}: {}", route.getTargetUrl(), ex.getMessage());
